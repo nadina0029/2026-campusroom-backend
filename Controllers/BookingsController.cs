@@ -104,5 +104,27 @@ namespace CampusRoomBackend.Controllers
                 .OrderByDescending(b => b.StartTime)
                 .ToListAsync();
         }
+        // 4. PUT: Update Status (Hanya Admin: Approve/Reject)
+        [HttpPut("{id}/status")]
+        [Authorize(Roles = "Admin")] // HANYA ADMIN!
+        public async Task<IActionResult> UpdateBookingStatus(int id, BookingStatusRequest request)
+        {
+            // A. Cari bookingnya
+            var booking = await _context.Bookings.FindAsync(id);
+            if (booking == null) return NotFound("Booking tidak ditemukan.");
+
+            // B. Validasi Input (Cuma boleh Approved/Rejected)
+            if (request.Status != "Approved" && request.Status != "Rejected")
+            {
+                return BadRequest("Status hanya boleh 'Approved' atau 'Rejected'.");
+            }
+
+            // C. Update data
+            booking.Status = request.Status;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = $"Status berhasil diubah menjadi {request.Status}", data = booking });
+        }
     }
+    
 }
