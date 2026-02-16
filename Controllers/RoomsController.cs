@@ -17,12 +17,24 @@ namespace CampusRoomBackend.Controllers
             _context = context;
         }
 
-        // 1. GET: Semua orang yang sudah login boleh lihat
+        // 1. GET: Semua orang boleh lihat + FITUR SEARCH
         [HttpGet]
-        [Authorize] 
-        public async Task<ActionResult<IEnumerable<Room>>> GetRooms()
+        [Authorize]
+        public async Task<ActionResult<IEnumerable<Room>>> GetRooms([FromQuery] string? search)
         {
-            return await _context.Rooms.ToListAsync();
+            // A. Siapkan Query
+            var query = _context.Rooms.AsQueryable();
+
+            // B. Logika Search
+            if (!string.IsNullOrEmpty(search))
+            {
+                // Cari berdasarkan Nama Ruangan
+                // (Kamu bisa tambah kondisi lain, misal deskripsi kalau ada)
+                query = query.Where(r => r.Name.Contains(search));
+            }
+
+            // C. Eksekusi
+            return await query.ToListAsync();
         }
 
         // 2. GET Detail: Semua orang yang sudah login boleh lihat
