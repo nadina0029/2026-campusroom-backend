@@ -45,6 +45,16 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp",
+        policy =>
+        {
+            policy.WithOrigins("http://localhost:5173") // Port default Vite React
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        });
+});
 
 // A. Setup Database
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -92,6 +102,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors("AllowReactApp");
 app.UseHttpsRedirection();
 
 // Urutan Wajib: Authentication dulu, baru Authorization

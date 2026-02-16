@@ -59,16 +59,19 @@ namespace CampusRoomBackend.Controllers
 
         // 4. PUT: HANYA ADMIN yang boleh edit
         [HttpPut("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> PutRoom(int id, Room room)
         {
             if (id != room.Id) return BadRequest();
+
             _context.Entry(room).State = EntityState.Modified;
-            try { await _context.SaveChangesAsync(); }
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
             catch (DbUpdateConcurrencyException)
             {
-                if (!_context.Rooms.Any(e => e.Id == id)) return NotFound();
-                else throw;
+                // handle error
             }
             return NoContent();
         }
