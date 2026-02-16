@@ -76,19 +76,42 @@ namespace CampusRoomBackend.Controllers
             return CreatedAtAction(nameof(GetMyBookings), new { id = newBooking.Id }, newBooking);
         }
 
-        // 2. GET: Lihat Booking Saya (Mahasiswa cuma lihat punya sendiri)
+        // 2. GET: Lihat Booking Saya (Mahasiswa) + FITUR SEARCH & FILTER
         [HttpGet("my-bookings")]
         [Authorize]
-        public async Task<ActionResult<IEnumerable<Booking>>> GetMyBookings()
+        public async Task<ActionResult<IEnumerable<Booking>>> GetMyBookings(
+            [FromQuery] string? search, // Bisa cari Nama Ruangan atau Keperluan
+            [FromQuery] string? status  // Bisa filter status (Pending/Approved/Rejected)
+        )
         {
+            // A. Ambil ID User yang sedang login
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("id");
             if (string.IsNullOrEmpty(userIdString)) return Unauthorized();
             int userId = int.Parse(userIdString);
 
-            // Tampilkan booking user tersebut + detail ruangannya
-            return await _context.Bookings
-                .Include(b => b.Room) // Join tabel Room
-                .Where(b => b.UserId == userId)
+            // B. Siapkan Query (Hanya ambil data milik User ini)
+            var query = _context.Bookings
+                .Include(b => b.Room) // Join ke tabel Room biar tahu nama ruangannya
+                .Where(b => b.UserId == userId) // FILTER WAJIB: Cuma boleh lihat punya sendiri
+                .AsQueryable();
+
+            // C. Logika Pencarian (Search)
+            if (!string.IsNullOrEmpty(search))
+            {
+                // Cari berdasarkan Nama Ruangan ATAU Keperluan (Purpose)
+                query = query.Where(b => 
+                    b.Room.Name.Contains(search) || 
+                    b.Purpose.Contains(search));
+            }
+
+            // D. Logika Filter Status
+            if (!string.IsNullOrEmpty(status))
+            {
+                query = query.Where(b => b.Status == status);
+            }
+
+            // E. Urutkan dari yang terbaru
+            return await query
                 .OrderByDescending(b => b.StartTime)
                 .ToListAsync();
         }
