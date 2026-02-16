@@ -93,16 +93,42 @@ namespace CampusRoomBackend.Controllers
                 .ToListAsync();
         }
 
-        // 3. GET: Lihat Semua Booking (Khusus Admin)
+        // 3. GET: Lihat Semua Booking (Khusus Admin) + FITUR SEARCH
         [HttpGet("all")]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<IEnumerable<Booking>>> GetAllBookings()
+        public async Task<ActionResult<IEnumerable<Booking>>> GetAllBookings(
+            [FromQuery] string? search, // Bisa cari nama user atau nama ruangan
+            [FromQuery] string? status  // Bisa filter status (Pending/Approved/Rejected)
+        )
         {
-            return await _context.Bookings
-                .Include(b => b.User) // Lihat siapa yang pinjam
-                .Include(b => b.Room) // Lihat ruangan apa
+            // A. Siapkan Query Dasar (Belum dieksekusi)
+            var query = _context.Bookings
+                .Include(b => b.User)
+                .Include(b => b.Room)
+                .AsQueryable();
+
+            // B. Logika Pencarian (Search)
+            if (!string.IsNullOrEmpty(search))
+            {
+                // Cari berdasarkan Nama User ATAU Nama Ruangan
+                query = query.Where(b => 
+                    b.User.Username.Contains(search) || 
+                    b.Room.Name.Contains(search) ||
+                    b.Purpose.Contains(search));
+            }
+
+            // C. Logika Filter Status
+            if (!string.IsNullOrEmpty(status))
+            {
+                query = query.Where(b => b.Status == status);
+            }
+
+            // D. Urutkan dari yang terbaru
+            var bookings = await query
                 .OrderByDescending(b => b.StartTime)
                 .ToListAsync();
+
+            return bookings;
         }
         // 4. PUT: Update Status (Hanya Admin: Approve/Reject)
         [HttpPut("{id}/status")]
