@@ -4,12 +4,18 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models; // <--- Baris PENTING yang tadi kurang
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // --- 1. KONFIGURASI SERVICES ---
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // INI KUNCINYA: Abaikan looping relasi
+        options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    });
 builder.Services.AddEndpointsApiExplorer();
 
 // Konfigurasi Swagger (Gembok Auth)
@@ -86,10 +92,10 @@ using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     var context = services.GetRequiredService<AppDbContext>();
-    
+
     // Pastikan database terbuat
     context.Database.EnsureCreated();
-    
+
     // Jalankan Seeder
     DbSeeder.Seed(context);
 }
@@ -106,7 +112,7 @@ app.UseCors("AllowReactApp");
 app.UseHttpsRedirection();
 
 // Urutan Wajib: Authentication dulu, baru Authorization
-app.UseAuthentication(); 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

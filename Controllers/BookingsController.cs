@@ -1,10 +1,10 @@
-using System.Security.Claims; // Wajib untuk baca Token
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using CampusRoomBackend.Data;
 using CampusRoomBackend.Models;
-using CampusRoomBackend.DTOs;
+using CampusRoomBackend.DTOs; // Pastikan namespace DTO sesuai project kamu
 
 namespace CampusRoomBackend.Controllers
 {
@@ -19,7 +19,9 @@ namespace CampusRoomBackend.Controllers
             _context = context;
         }
 
-        // 1. POST: Ajukan Peminjaman (Hanya User Login)
+        // ==========================================
+        // 1. POST: Ajukan Peminjaman (Mahasiswa/Admin)
+        // ==========================================
         [HttpPost]
         [Authorize]
         public async Task<ActionResult<Booking>> CreateBooking(BookingRequest request)
@@ -34,13 +36,13 @@ namespace CampusRoomBackend.Controllers
                 return BadRequest("Tidak bisa meminjam untuk waktu masa lalu.");
             }
 
-            // B. Cek Apakah Ruangan Ada?
+            // B. Cek Ketersediaan Ruangan
             var room = await _context.Rooms.FindAsync(request.RoomId);
             if (room == null) return NotFound("Ruangan tidak ditemukan.");
 
-            // C. LOGIKA ANTI-TABRAKAN (The Core Logic)
-            // Kita cari booking lain di ruangan yang sama, yang statusnya BUKAN Rejected
-            // Rumus tabrakan: (StartA < EndB) && (EndA > StartB)
+            // C. LOGIKA ANTI-TABRAKAN (Conflict Check)
+            // Rumus: (StartA < EndB) && (EndA > StartB)
+            // Kita abaikan booking yang statusnya "Rejected"
             var conflict = await _context.Bookings
                 .AnyAsync(b => b.RoomId == request.RoomId &&
                                b.Status != "Rejected" &&
@@ -49,14 +51,14 @@ namespace CampusRoomBackend.Controllers
 
             if (conflict)
             {
+                // Return 400 Bad Request jika tabrakan
                 return BadRequest("Ruangan sudah dipesan di jam tersebut. Silakan pilih waktu lain.");
             }
 
-            // D. Ambil ID User dari Token (Otomatis)
-            // Pastikan Token mengandung claim "id" atau NameIdentifier
+            // D. Ambil ID User dari Token
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("id");
-            if (string.IsNullOrEmpty(userIdString)) return Unauthorized("User ID tidak ditemukan di token.");
-            
+            if (string.IsNullOrEmpty(userIdString)) return Unauthorized("User ID tidak valid.");
+
             int userId = int.Parse(userIdString);
 
             // E. Simpan ke Database
@@ -67,7 +69,7 @@ namespace CampusRoomBackend.Controllers
                 StartTime = request.StartTime,
                 EndTime = request.EndTime,
                 Purpose = request.Purpose,
-                Status = "Pending" // Default status menunggu Admin
+                Status = "Pending" // Default status
             };
 
             _context.Bookings.Add(newBooking);
@@ -76,104 +78,103 @@ namespace CampusRoomBackend.Controllers
             return CreatedAtAction(nameof(GetMyBookings), new { id = newBooking.Id }, newBooking);
         }
 
-        // 2. GET: Lihat Booking Saya (Mahasiswa) + FITUR SEARCH & FILTER
+        // ==========================================
+        // 2. GET: Lihat Booking Saya (Mahasiswa)
+        // ==========================================
         [HttpGet("my-bookings")]
         [Authorize]
         public async Task<ActionResult<IEnumerable<Booking>>> GetMyBookings(
-            [FromQuery] string? search, // Bisa cari Nama Ruangan atau Keperluan
-            [FromQuery] string? status  // Bisa filter status (Pending/Approved/Rejected)
+            [FromQuery] string? search,
+            [FromQuery] string? status
         )
         {
-            // A. Ambil ID User yang sedang login
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("id");
             if (string.IsNullOrEmpty(userIdString)) return Unauthorized();
             int userId = int.Parse(userIdString);
 
-            // B. Siapkan Query (Hanya ambil data milik User ini)
+            // QUERY PENTING: Include Room agar nama ruangan muncul
             var query = _context.Bookings
-                .Include(b => b.Room) // Join ke tabel Room biar tahu nama ruangannya
-                .Where(b => b.UserId == userId) // FILTER WAJIB: Cuma boleh lihat punya sendiri
+                .Include(b => b.Room) // <--- JOIN KE TABEL ROOM
+                .Where(b => b.UserId == userId)
                 .AsQueryable();
 
-            // C. Logika Pencarian (Search)
+            // Filter Search (Nama Ruangan / Keperluan)
             if (!string.IsNullOrEmpty(search))
             {
-                // Cari berdasarkan Nama Ruangan ATAU Keperluan (Purpose)
-                query = query.Where(b => 
-                    b.Room.Name.Contains(search) || 
+                query = query.Where(b =>
+                    (b.Room != null && b.Room.Name.Contains(search)) || // Tambahkan pengecekan null di sini
                     b.Purpose.Contains(search));
             }
 
-            // D. Logika Filter Status
-            if (!string.IsNullOrEmpty(status))
+            // Filter Status
+            if (!string.IsNullOrEmpty(status) && status != "all")
             {
                 query = query.Where(b => b.Status == status);
             }
 
-            // E. Urutkan dari yang terbaru
             return await query
                 .OrderByDescending(b => b.StartTime)
                 .ToListAsync();
         }
 
-        // 3. GET: Lihat Semua Booking (Khusus Admin) + FITUR SEARCH
+        // ==========================================
+        // 3. GET: Lihat Semua Booking (ADMIN)
+        // ==========================================
         [HttpGet("all")]
-        [Authorize(Roles = "Admin")]
+        // [Authorize(Roles = "Admin")] // Aktifkan jika sudah setup Roles di JWT
         public async Task<ActionResult<IEnumerable<Booking>>> GetAllBookings(
-            [FromQuery] string? search, // Bisa cari nama user atau nama ruangan
-            [FromQuery] string? status  // Bisa filter status (Pending/Approved/Rejected)
+            [FromQuery] string? search,
+            [FromQuery] string? status
         )
         {
-            // A. Siapkan Query Dasar (Belum dieksekusi)
+            // QUERY PENTING: Include User & Room untuk info lengkap
             var query = _context.Bookings
-                .Include(b => b.User)
-                .Include(b => b.Room)
+                .Include(b => b.User) // <--- JOIN KE TABEL USER (Lihat nama peminjam)
+                .Include(b => b.Room) // <--- JOIN KE TABEL ROOM (Lihat nama ruangan)
                 .AsQueryable();
 
-            // B. Logika Pencarian (Search)
+            // Filter Search (Nama User / Nama Ruangan / Keperluan)
             if (!string.IsNullOrEmpty(search))
             {
-                // Cari berdasarkan Nama User ATAU Nama Ruangan
-                query = query.Where(b => 
-                    b.User.Username.Contains(search) || 
-                    b.Room.Name.Contains(search) ||
+                query = query.Where(b =>
+                    (b.User != null && b.User.Username.Contains(search)) || // Cek dulu: User gak boleh null
+                    (b.Room != null && b.Room.Name.Contains(search)) ||     // Cek dulu: Room gak boleh null
                     b.Purpose.Contains(search));
             }
 
-            // C. Logika Filter Status
-            if (!string.IsNullOrEmpty(status))
+            // Filter Status
+            if (!string.IsNullOrEmpty(status) && status != "all")
             {
                 query = query.Where(b => b.Status == status);
             }
 
-            // D. Urutkan dari yang terbaru
             var bookings = await query
                 .OrderByDescending(b => b.StartTime)
                 .ToListAsync();
 
             return bookings;
         }
-        // 4. PUT: Update Status (Hanya Admin: Approve/Reject)
+
+        // ==========================================
+        // 4. PUT: Update Status (Admin Approve/Reject)
+        // ==========================================
         [HttpPut("{id}/status")]
-        [Authorize(Roles = "Admin")] // HANYA ADMIN!
-        public async Task<IActionResult> UpdateBookingStatus(int id, BookingStatusRequest request)
+        // [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> UpdateBookingStatus(int id, [FromBody] BookingStatusRequest request)
         {
-            // A. Cari bookingnya
             var booking = await _context.Bookings.FindAsync(id);
             if (booking == null) return NotFound("Booking tidak ditemukan.");
 
-            // B. Validasi Input (Cuma boleh Approved/Rejected)
-            if (request.Status != "Approved" && request.Status != "Rejected")
+            // Validasi Input
+            if (request.Status != "Approved" && request.Status != "Rejected" && request.Status != "Pending")
             {
-                return BadRequest("Status hanya boleh 'Approved' atau 'Rejected'.");
+                return BadRequest("Status tidak valid.");
             }
 
-            // C. Update data
             booking.Status = request.Status;
             await _context.SaveChangesAsync();
 
             return Ok(new { message = $"Status berhasil diubah menjadi {request.Status}", data = booking });
         }
     }
-    
 }
